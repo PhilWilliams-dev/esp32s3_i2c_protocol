@@ -1,0 +1,10 @@
+choice
+    prompt "I2C Protocol Role"
+    default I2C_PROTOCOL_SLAVE
+
+config I2C_PROTOCOL_MASTER
+    bool "Master"
+
+config I2C_PROTOCOL_SLAVE
+    bool "Slave"
+endchoice
