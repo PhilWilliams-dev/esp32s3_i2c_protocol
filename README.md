@@ -61,16 +61,21 @@ Run `idf.py menuconfig` and navigate to **Component config > I2C Protocol**.
 
 ### Hardware
 
+## Required
 | Setting | Default | Description |
 |---|---|---|
 | SDA GPIO pin | 8 | GPIO number for the SDA line |
 | SCL GPIO pin | 9 | GPIO number for the SCL line |
 | I2C port | I2C_NUM_0 | I2C peripheral (0 or 1) |
+
+## Optional
+| Setting | Default | Description |
+|---|---|---|
 | Bus speed | 100000 Hz | I2C clock frequency |
 | 7-bit addressing | Yes | Uncheck for 10-bit addressing |
 | SCL wait timeout | 10000000 us | Clock-stretching timeout |
 
-### Protocol Tuning
+### Optional Protocol Tuning
 
 | Setting | Default | Description |
 |---|---|---|
