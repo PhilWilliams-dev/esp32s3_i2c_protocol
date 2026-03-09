@@ -84,15 +84,21 @@ static bool i2c_slave_rx_cb(i2c_slave_dev_handle_t handle, const i2c_slave_rx_do
 /// @brief Decodes the raw buffer into rx_current_packet and validates the CRC.
 ///        On any decode error, sets TX to error state so the master can retrieve CMD_ERR.
 void rx_receiving_state(){
+    ASYNC_LOG("SLV_RX", "Received %lu bytes", raw_rx_buffer_length);
+    ASYNC_LOG_HEX("SLV_RX", "Raw: ", raw_rx_buffer, PACKET_TOTAL_SIZE);
+
     esp_err_t decode = decode_received_packet(raw_rx_buffer, raw_rx_buffer_length, &rx_current_packet);
 
     switch(decode){
         case ESP_OK:
+            ASYNC_LOG("SLV_RX", "Decoded cmd=%u reply=%u len=%u", rx_current_packet.command, rx_current_packet.reply, rx_current_packet.length);
+            ASYNC_LOG_HEX("SLV_RX", "Payload: ", rx_current_packet.data, rx_current_packet.length);
             rx_state = RX_STATE_PROCESSING;
             break;
         case ESP_ERR_INVALID_SIZE:
         case ESP_ERR_INVALID_CRC:
         case ESP_ERR_INVALID_STATE:
+            ASYNC_LOG("SLV_RX", "Decode error: %d", decode);
             rx_state = RX_STATE_CLEANUP;
             tx_state = TX_STATE_ERROR;
             break;
@@ -195,6 +201,7 @@ void tx_sending_state(){
         __sync_synchronize();
     }
     else{
+        ASYNC_LOG("SLV_TX", "Timeout waiting for tx_ready -- sending CMD_ERR");
         tx_current_packet.command = CMD_ERR;
         tx_current_packet.length = 0;
     }
@@ -205,14 +212,18 @@ void tx_sending_state(){
     if(tx_current_packet.reply == REPLY_OK){
         uint8_t okpayload[1];
         okpayload[0] = CMD_OK;
+        ASYNC_LOG("SLV_TX", "Sending REPLY_OK (1 byte, CMD_OK)");
         txerr = i2c_slave_write(slave_handle, okpayload, 1, &writeout, I2C_REQUEST_TIMEOUT);
     }
     else{
         assemble_transmit_buffer(&tx_current_packet, raw_tx_buffer);
+        ASYNC_LOG("SLV_TX", "Sending cmd=%u reply=%u len=%u", tx_current_packet.command, tx_current_packet.reply, tx_current_packet.length);
+        ASYNC_LOG_HEX("SLV_TX", "Raw: ", raw_tx_buffer, PACKET_TOTAL_SIZE);
         txerr = i2c_slave_write(slave_handle, raw_tx_buffer, PACKET_TOTAL_SIZE, &writeout, I2C_REQUEST_TIMEOUT);
     }
     
     if(txerr != ESP_OK){
+        ASYNC_LOG("SLV_TX", "Write failed: %d", txerr);
         tx_state = TX_STATE_CLEANUP;
     }
     tx_state = TX_STATE_CLEANUP;
@@ -307,6 +318,7 @@ void i2c_slave_execute_command_task(void *arg) {
                     chunking = true;
                     uint16_t number_of_chunks = rx_current_packet.length;
                     uint16_t current_chunk = 0;
+                    ASYNC_LOG("SLV_CHUNK", "Start RX chunking: %u chunks expected", number_of_chunks);
 
                     chunked_data = malloc((number_of_chunks * PACKET_PAYLOAD_SIZE + 1) * sizeof(uint8_t));
                     
@@ -359,6 +371,7 @@ void i2c_slave_execute_command_task(void *arg) {
 
                                 memcpy(chunked_data + chunked_data_length, rx_current_packet.data, rx_current_packet.length);
                                 chunked_data_length +=rx_current_packet.length;
+                                ASYNC_LOG("SLV_CHUNK", "RX chunk %u/%u (%u bytes)", current_chunk, number_of_chunks, rx_current_packet.length);
                                 
 
                                 // Acknowledge this chunk
@@ -389,6 +402,7 @@ void i2c_slave_execute_command_task(void *arg) {
                                 else{
                                     // CMD_END_CHUNKING carries the reply type for the actual command
                                     initial_packet.reply = rx_current_packet.reply; 
+                                    ASYNC_LOG("SLV_CHUNK", "RX chunking complete: %u bytes total", chunked_data_length);
                                     
                                     chunking = false;
                                     current_chunk = 0;
@@ -433,6 +447,7 @@ void i2c_slave_execute_command_task(void *arg) {
                     initial_packet.crc = rx_current_packet.crc;
                     
                     memcpy(initial_packet.data, rx_current_packet.data, rx_current_packet.length);
+                    ASYNC_LOG("SLV_CMD", "Single-packet cmd=%u reply=%u len=%u", initial_packet.command, initial_packet.reply, initial_packet.length);
                 }
 
                 // ── Look up and execute the registered command handler ──
@@ -440,6 +455,7 @@ void i2c_slave_execute_command_task(void *arg) {
                 for (uint32_t i = 0; i < slave_registry_count; i++) {
 
                 if (command_registry[i].command == initial_packet.command) {
+                    ASYNC_LOG("SLV_CMD", "Dispatching cmd=%u reply=%u", initial_packet.command, initial_packet.reply);
                     
                     if(chunked_data != NULL && chunked_data_length > 0){
                         // Inbound chunked data is ready for the handler
@@ -450,6 +466,7 @@ void i2c_slave_execute_command_task(void *arg) {
                     }
                     
                     esp_err_t err = command_registry[i].process_command(&initial_packet, &tx_current_packet, &chunked_data, &chunked_data_length);
+                    ASYNC_LOG("SLV_CMD", "Handler result: %d", err);
 
                     if (err == ESP_OK){
 
@@ -485,6 +502,7 @@ void i2c_slave_execute_command_task(void *arg) {
                             uint16_t current_chunk = 0;
                             uint16_t data_offset = 0;
                             uint16_t number_of_chunks = bytes_to_chunks(chunked_data_length);
+                            ASYNC_LOG("SLV_CHUNK", "Start TX chunking: %u chunks, %u bytes", number_of_chunks, chunked_data_length);
                             
                             // Tell the master how many chunks to expect
                             tx_current_packet.command = CMD_START_CHUNKING;
@@ -515,6 +533,7 @@ void i2c_slave_execute_command_task(void *arg) {
                                     memcpy(tx_current_packet.data, chunked_data + data_offset, tx_current_packet.length);
                                  
                                     data_offset += tx_current_packet.length;
+                                    ASYNC_LOG("SLV_CHUNK", "TX chunk %u/%u (%u bytes)", current_chunk, number_of_chunks, tx_current_packet.length);
                         
                                     tx_ready = true;
                                     xSemaphoreGive(tx_ready_sem);
@@ -543,6 +562,7 @@ void i2c_slave_execute_command_task(void *arg) {
                                 }
 
                                 // All chunks sent -- send CMD_END_CHUNKING
+                                ASYNC_LOG("SLV_CHUNK", "TX chunking complete");
                                 tx_current_packet.command = CMD_END_CHUNKING;
                                 tx_current_packet.length = 0;
                                 tx_current_packet.reply = REPLY_NONE;
@@ -611,6 +631,7 @@ void i2c_slave_execute_command_task(void *arg) {
             }
 
              // No registered handler found for this command
+             ASYNC_LOG("SLV_CMD", "No handler for cmd=%u", initial_packet.command);
              rx_state = RX_STATE_CLEANUP;
              tx_state = TX_STATE_CLEANUP;
              if(chunked_data != NULL) {
@@ -655,7 +676,7 @@ esp_err_t i2c_protocol_init(uint8_t slaveid){
         vTaskSuspend(NULL);
     }
 
-    async_log_init();
+    ASYNC_LOG_INIT();
 
     memset(raw_rx_buffer, 0, PACKET_TOTAL_SIZE);
     memset(raw_tx_buffer, 0, PACKET_TOTAL_SIZE);

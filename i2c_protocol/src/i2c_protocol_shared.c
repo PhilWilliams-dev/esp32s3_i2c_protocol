@@ -13,12 +13,7 @@
 #include "i2c_protocol_shared.h"
 
 
-// Asynchronous debug logging system
-// Controlled by ASYNC_DEBUG_ENABLED in i2c_protocol_shared.h
-#ifndef ASYNC_DEBUG_ENABLED
-#define ASYNC_DEBUG_ENABLED 0
-#endif
-
+// ─── Asynchronous Logging ────────────────────────────────────────────
 #if ASYNC_DEBUG_ENABLED
 
 #define ASYNC_LOG_QUEUE_SIZE 1000
@@ -144,12 +139,7 @@ void async_log_hex(const char* tag, const char* prefix, const uint8_t* data, siz
     async_log(tag, "%s", buf);
 }
 
-#else
-// No-op stubs when async logging is disabled
-void async_log_init(void) {}
-void async_log(const char* tag, const char* format, ...) {}
-void async_log_hex(const char* tag, const char* prefix, const uint8_t* data, size_t len) {}
-#endif
+#endif // ASYNC_DEBUG_ENABLED
 
 
 /// @brief Returns the number of chunks needed to send the given byte count.

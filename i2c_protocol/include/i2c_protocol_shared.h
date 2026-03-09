@@ -148,7 +148,7 @@ char* make_null_terminated_str(const uint8_t* data, size_t length);
 #define ASYNC_DEBUG_ENABLED 0
 #endif
 
-#define ASYNC_LOG(tag, format, ...) async_log((tag), (format), ##__VA_ARGS__);
+#if ASYNC_DEBUG_ENABLED
 
 /// @brief Initialises the async logging queue and background task. Safe to call multiple times.
 void async_log_init(void);
@@ -164,6 +164,18 @@ void async_log(const char* tag, const char* format, ...);
 /// @param data Byte array to dump (may be NULL).
 /// @param len Number of bytes to dump.
 void async_log_hex(const char* tag, const char* prefix, const uint8_t* data, size_t len);
+
+#define ASYNC_LOG_INIT()                       async_log_init()
+#define ASYNC_LOG(tag, format, ...)            async_log((tag), (format), ##__VA_ARGS__)
+#define ASYNC_LOG_HEX(tag, prefix, data, len)  async_log_hex((tag), (prefix), (data), (len))
+
+#else
+
+#define ASYNC_LOG_INIT()                       do {} while(0)
+#define ASYNC_LOG(tag, format, ...)            do {} while(0)
+#define ASYNC_LOG_HEX(tag, prefix, data, len)  do {} while(0)
+
+#endif
 
 
 

@@ -59,12 +59,16 @@ void rx_receiving_state(){
     // REPLY_OK is a single-byte acknowledgement; everything else is a full packet
     if(tx_current_packet.reply == REPLY_OK && !reply_chunking){
         err = i2c_master_receive(slave_device, raw_rx_buffer, 1, I2C_REQUEST_TIMEOUT);
+        ASYNC_LOG("MST_RX", "Received 1-byte REPLY_OK");
     }
     else{
         err = i2c_master_receive(slave_device, raw_rx_buffer, PACKET_TOTAL_SIZE, I2C_REQUEST_TIMEOUT);
+        ASYNC_LOG("MST_RX", "Received %u bytes", PACKET_TOTAL_SIZE);
+        ASYNC_LOG_HEX("MST_RX", "Raw: ", raw_rx_buffer, PACKET_TOTAL_SIZE);
     }
 
     if(err != ESP_OK){
+        ASYNC_LOG("MST_RX", "Receive failed: %d", err);
         request_err = err;
         request_error_state = true;
         request_complete = true;
@@ -75,12 +79,16 @@ void rx_receiving_state(){
     err = decode_received_packet(raw_rx_buffer, PACKET_TOTAL_SIZE, &rx_current_packet);
 
     if(err != ESP_OK){
+        ASYNC_LOG("MST_RX", "Decode error: %d", err);
         request_err = err;
         request_error_state = true;
         request_complete = true;
         rx_state = RX_STATE_CLEANUP;
         return;
     }
+
+    ASYNC_LOG("MST_RX", "Decoded cmd=%u reply=%u len=%u", rx_current_packet.command, rx_current_packet.reply, rx_current_packet.length);
+    ASYNC_LOG_HEX("MST_RX", "Payload: ", rx_current_packet.data, rx_current_packet.length);
 
     // Save chunking control packets before cleanup clears rx_current_packet
     if(rx_current_packet.command == CMD_START_CHUNKING || rx_current_packet.command == CMD_END_CHUNKING){
@@ -188,10 +196,13 @@ void i2c_master_rx_task(void *arg){
 ///        If a reply is expected, kicks the RX state machine into RECEIVING and
 ///        parks TX in WAIT until RX completes. Otherwise marks the request done.
 void tx_sending_state(){
- 
+    ASYNC_LOG("MST_TX", "Sending cmd=%u reply=%u len=%u", tx_current_packet.command, tx_current_packet.reply, tx_current_packet.length);
+    ASYNC_LOG_HEX("MST_TX", "Raw: ", raw_tx_buffer, PACKET_TOTAL_SIZE);
+
     esp_err_t err = i2c_master_transmit(slave_device, raw_tx_buffer, PACKET_TOTAL_SIZE, I2C_REQUEST_TIMEOUT);
     
     if(err != ESP_OK){
+        ASYNC_LOG("MST_TX", "Transmit failed: %d", err);
         request_err = err;
         request_error_state = true;
         request_complete = true;
@@ -286,6 +297,7 @@ esp_err_t make_chunked_request(i2c_command_t command, reply_type_t reply_type, u
     uint16_t current_chunk = 0;
     uint16_t data_offset = 0;
     uint16_t number_of_chunks = bytes_to_chunks(payload_length);
+    ASYNC_LOG("MST_CHUNK", "Start TX chunking: %u chunks, %lu bytes", number_of_chunks, payload_length);
     tx_current_packet.command = CMD_START_CHUNKING;
     tx_current_packet.length = number_of_chunks;
     tx_current_packet.reply = REPLY_OK;
@@ -326,6 +338,7 @@ esp_err_t make_chunked_request(i2c_command_t command, reply_type_t reply_type, u
             memcpy(tx_current_packet.data, payload + data_offset, tx_current_packet.length);
          
             data_offset += tx_current_packet.length;
+            ASYNC_LOG("MST_CHUNK", "TX chunk %u/%u (%u bytes)", current_chunk, number_of_chunks, tx_current_packet.length);
 
             tx_ready = true;
 
@@ -346,6 +359,7 @@ esp_err_t make_chunked_request(i2c_command_t command, reply_type_t reply_type, u
     }
 
     // All chunks sent -- send the end marker with the final reply type
+    ASYNC_LOG("MST_CHUNK", "TX chunking complete");
     tx_current_packet.command = CMD_END_CHUNKING;
     tx_current_packet.length = 0;
     tx_current_packet.reply = reply_type;
@@ -399,6 +413,7 @@ esp_err_t make_chunked_request(i2c_command_t command, reply_type_t reply_type, u
 /// @param response_length [out] Number of bytes written to *response_data. May be NULL for REPLY_NONE/OK.
 /// @return ESP_OK on success, or an appropriate esp_err_t on failure.
 esp_err_t i2c_make_request(i2c_command_t command, uint8_t *payload, uint32_t payload_length, uint8_t slave_id, reply_type_t reply_type, uint8_t **response_data, uint32_t *response_length){
+    ASYNC_LOG("MST_REQ", "Request cmd=%u reply=%u len=%lu slave=0x%02X", command, reply_type, payload_length, slave_id);
 
     esp_err_t error_check;
     
@@ -541,6 +556,7 @@ esp_err_t i2c_make_request(i2c_command_t command, uint8_t *payload, uint32_t pay
             if(rx_current_packet.command == CMD_START_CHUNKING){
                 reply_chunking = true;
                 number_of_chunks = rx_current_packet.length;
+                ASYNC_LOG("MST_CHUNK", "Start RX chunking: %u chunks expected", number_of_chunks);
                 
                 // Handle empty (0-chunk) response
                 if(number_of_chunks == 0) {
@@ -711,6 +727,7 @@ esp_err_t i2c_make_request(i2c_command_t command, uint8_t *payload, uint32_t pay
                 if(chunk_length > 0){
                     memcpy((*response_data) + chunked_data_length, chunk_data, chunk_length);
                     chunked_data_length += chunk_length;
+                    ASYNC_LOG("MST_CHUNK", "RX chunk %u/%u (%lu bytes)", current_chunk, number_of_chunks, chunk_length);
                 }
                 xSemaphoreGive(chunk_reply_read_sem);
                 
@@ -801,6 +818,7 @@ esp_err_t i2c_make_request(i2c_command_t command, uint8_t *payload, uint32_t pay
 
         // Brief delay on fire-and-forget sends to give the slave time to process
         vTaskDelay(pdMS_TO_TICKS(10));
+        ASYNC_LOG("MST_REQ", "Complete cmd=%u result=ESP_OK", command);
         return ESP_OK;
     }
 }
@@ -858,7 +876,7 @@ esp_err_t i2c_master_protocol_init(i2c_master_bus_config_t *bus_config){
         return ESP_FAIL;
     }
 
-    async_log_init();
+    ASYNC_LOG_INIT();
 
     return ESP_OK;
 }

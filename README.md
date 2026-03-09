@@ -374,3 +374,76 @@ User commands must use IDs **1--200**. IDs 201 and above are reserved by the dri
 | 252 | `CMD_RESTART` | Requests retransmission |
 | 254 | `CMD_ERR` | Error response |
 | 255 | `CMD_OK` | Success / acknowledgement |
+
+---
+
+## 6. Debug Logging
+
+The driver includes an async logging system designed for real-time debugging of I2C traffic. When enabled, it logs every packet entering and leaving both master and slave, allowing side-by-side comparison of what was sent versus what was received.
+
+### 6.1 Enabling
+
+Enable via `idf.py menuconfig`:
+
+**Component config > I2C Protocol > Enable async debug logging**
+
+When disabled (the default), all logging code is completely compiled out -- zero overhead, zero flash usage.
+
+### 6.2 Using in Your Command Handlers
+
+Three macros are available for use in your own code (e.g. `my_commands.c`):
+
+```c
+#include "i2c_protocol_shared.h"
+
+// Formatted text message (printf-style)
+ASYNC_LOG("MY_TAG", "Received value: %u", some_value);
+
+// Hex dump of a byte buffer
+ASYNC_LOG_HEX("MY_TAG", "Payload: ", data_ptr, data_length);
+
+// Initialise the logging system (already called by the driver --
+// only needed if you want logging before the driver starts)
+ASYNC_LOG_INIT();
+```
+
+When debug logging is disabled in menuconfig, non of the Logging code will not appear in the compiled binary.
+
+### 6.3 Example: Adding Logging to a Command Handler
+
+```c
+esp_err_t handle_sensor_read(data_packet_t *packet, data_packet_t *response_packet,
+                             uint8_t **chunked_payload, uint16_t *chunked_payload_length) {
+
+    ASYNC_LOG("SENSOR", "Sensor read requested, reply=%u", packet->reply);
+    ASYNC_LOG_HEX("SENSOR", "Inbound data: ", packet->data, packet->length);
+
+    uint16_t reading = read_adc();
+
+    response_packet->command = CMD_OK;
+    response_packet->length = 2;
+    integer_to_bytes(reading, response_packet->data, 0);
+
+    ASYNC_LOG("SENSOR", "Responding with reading=%u", reading);
+    ASYNC_LOG_HEX("SENSOR", "Response data: ", response_packet->data, response_packet->length);
+
+    return ESP_OK;
+}
+```
+
+### 6.4 Built-in Driver Tags
+
+The driver uses consistent tag prefixes so you can trace packets across the bus:
+
+| Tag | Side | Description |
+|---|---|---|
+| `MST_TX` | Master | Packet being transmitted to slave |
+| `MST_RX` | Master | Packet received from slave |
+| `MST_REQ` | Master | Request lifecycle (entry and completion) |
+| `MST_CHUNK` | Master | Chunking events (TX and RX) |
+| `SLV_RX` | Slave | Packet received from master |
+| `SLV_TX` | Slave | Packet being transmitted to master |
+| `SLV_CMD` | Slave | Command dispatch and handler results |
+| `SLV_CHUNK` | Slave | Chunking events (TX and RX) |
+
+To verify data integrity across the bus, compare the raw hex output of `MST_TX` with `SLV_RX` (master-to-slave direction) or `SLV_TX` with `MST_RX` (slave-to-master direction). The hex dumps should be identical.
