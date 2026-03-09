@@ -61,21 +61,21 @@ Run `idf.py menuconfig` and navigate to **Component config > I2C Protocol**.
 
 ### Hardware
 
-## Required
+### Required
 | Setting | Default | Description |
 |---|---|---|
 | SDA GPIO pin | 8 | GPIO number for the SDA line |
 | SCL GPIO pin | 9 | GPIO number for the SCL line |
 | I2C port | I2C_NUM_0 | I2C peripheral (0 or 1) |
 
-## Optional
+#### Optional
 | Setting | Default | Description |
 |---|---|---|
 | Bus speed | 100000 Hz | I2C clock frequency |
 | 7-bit addressing | Yes | Uncheck for 10-bit addressing |
 | SCL wait timeout | 10000000 us | Clock-stretching timeout |
 
-### Optional Protocol Tuning
+#### Optional Protocol Tuning
 
 | Setting | Default | Description |
 |---|---|---|
@@ -112,7 +112,7 @@ Create a commands header (e.g. `my_commands.h`):
 #include "i2c_protocol_shared.h"
 
 // Command IDs must be 1--200.
-// IDs 201+ are reserved by the driver (CMD_RESERVED_MIN).
+// IDs 201+ are reserved by the driver.
 #define CMD_LED_TOGGLE   1
 #define CMD_GET_SENSOR   2
 #define CMD_SEND_CONFIG  3
