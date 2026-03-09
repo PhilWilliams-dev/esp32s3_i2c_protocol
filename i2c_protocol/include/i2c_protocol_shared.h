@@ -7,31 +7,43 @@
 #include "esp_err.h"
 #include "driver/i2c_types.h"
 
+// ── Configuration mapped from Kconfig (idf.py menuconfig) ──
 
-#define MAX_PAYLOAD_SIZE (122880)  // User-defined total payload size in bytes (e.g., 120 KB)
-#define PACKET_HEADER_SIZE 4      // command (1) + reply (1) + length (2, little-endian)
-#define PACKET_CRC_SIZE 2         // 16-bit CRC (little-endian)
-#define PACKET_PAYLOAD_SIZE 40    // Fixed payload size per chunk (adjustable)
+// Hardware
+#define SDA_PIN             CONFIG_I2C_PROTOCOL_SDA_PIN
+#define SCL_PIN             CONFIG_I2C_PROTOCOL_SCL_PIN
+#define I2C_BUS_SPEED       CONFIG_I2C_PROTOCOL_BUS_SPEED
+#define I2C_SCL_WAIT_US     CONFIG_I2C_PROTOCOL_SCL_WAIT_US
 
-// Do not modify these unless you know what you are doing
-#define PACKET_TOTAL_SIZE (PACKET_HEADER_SIZE + PACKET_PAYLOAD_SIZE + PACKET_CRC_SIZE)
-#define I2C_RX_TASK_STACK_SIZE 4096
-#define I2C_TX_TASK_STACK_SIZE 4096
-#define I2C_PROC_TASK_STACK_SIZE 4096
-
-// I2C Timing
-#define I2C_COMMS_MANAGER_DELAY 10  // Cycle time (ms) for TX and RX task loops
-#define I2C_REQUEST_TIMEOUT 5000
-#define I2C_COMMS_TASK_PRIORITY 5
-#define I2C_PROC_TASK_PRIORITY 5
-
-// I2C Config
-#define I2C_BUS_SPEED 100000
-#define SDA_PIN GPIO_NUM_8
-#define SCL_PIN GPIO_NUM_9
+#if defined(CONFIG_I2C_PROTOCOL_PORT_0)
 #define I2C_PORT I2C_NUM_0
+#elif defined(CONFIG_I2C_PROTOCOL_PORT_1)
+#define I2C_PORT I2C_NUM_1
+#endif
+
+#ifdef CONFIG_I2C_PROTOCOL_ADDR_BIT_7
 #define I2C_ADDR_BIT I2C_ADDR_BIT_7
-#define I2C_SCL_WAIT_US 10000000
+#else
+#define I2C_ADDR_BIT I2C_ADDR_BIT_10
+#endif
+
+// Protocol tuning
+#define MAX_PAYLOAD_SIZE        CONFIG_I2C_PROTOCOL_MAX_PAYLOAD_SIZE
+#define PACKET_PAYLOAD_SIZE     CONFIG_I2C_PROTOCOL_PACKET_PAYLOAD_SIZE
+#define I2C_REQUEST_TIMEOUT     CONFIG_I2C_PROTOCOL_REQUEST_TIMEOUT
+#define I2C_COMMS_MANAGER_DELAY CONFIG_I2C_PROTOCOL_COMMS_MANAGER_DELAY
+
+// Protocol-structural constants
+#define PACKET_HEADER_SIZE 4   // command (1) + reply (1) + length (2, little-endian)
+#define PACKET_CRC_SIZE 2      // 16-bit CRC (little-endian)
+#define PACKET_TOTAL_SIZE (PACKET_HEADER_SIZE + PACKET_PAYLOAD_SIZE + PACKET_CRC_SIZE)
+
+// Task configuration
+#define I2C_RX_TASK_STACK_SIZE   CONFIG_I2C_PROTOCOL_RX_TASK_STACK_SIZE
+#define I2C_TX_TASK_STACK_SIZE   CONFIG_I2C_PROTOCOL_TX_TASK_STACK_SIZE
+#define I2C_PROC_TASK_STACK_SIZE CONFIG_I2C_PROTOCOL_PROC_TASK_STACK_SIZE
+#define I2C_COMMS_TASK_PRIORITY  CONFIG_I2C_PROTOCOL_COMMS_TASK_PRIORITY
+#define I2C_PROC_TASK_PRIORITY   CONFIG_I2C_PROTOCOL_PROC_TASK_PRIORITY
 
 // Command type - extensible by user
 typedef uint8_t i2c_command_t;
@@ -130,8 +142,9 @@ bool is_null_terminated(const uint8_t* data, size_t length);
 /// @return Heap-allocated null-terminated char*, or NULL on failure/invalid input.
 char* make_null_terminated_str(const uint8_t* data, size_t length);
 
-// Set ASYNC_DEBUG_ENABLED to 1 to enable async logging, 0 to disable
-#ifndef ASYNC_DEBUG_ENABLED
+#ifdef CONFIG_I2C_PROTOCOL_ASYNC_DEBUG
+#define ASYNC_DEBUG_ENABLED 1
+#else
 #define ASYNC_DEBUG_ENABLED 0
 #endif
 

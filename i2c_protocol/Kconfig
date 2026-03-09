@@ -1,10 +1,100 @@
-choice
-    prompt "I2C Protocol Role"
-    default I2C_PROTOCOL_SLAVE
+menu "I2C Protocol"
 
-config I2C_PROTOCOL_MASTER
-    bool "Master"
+    choice I2C_PROTOCOL_ROLE
+        prompt "Protocol role"
+        default I2C_PROTOCOL_SLAVE
 
-config I2C_PROTOCOL_SLAVE
-    bool "Slave"
-endchoice
+        config I2C_PROTOCOL_MASTER
+            bool "Master"
+
+        config I2C_PROTOCOL_SLAVE
+            bool "Slave"
+    endchoice
+
+    menu "Hardware"
+
+        config I2C_PROTOCOL_SDA_PIN
+            int "SDA GPIO pin number"
+            default 8
+            range 0 48
+
+        config I2C_PROTOCOL_SCL_PIN
+            int "SCL GPIO pin number"
+            default 9
+            range 0 48
+
+        choice I2C_PROTOCOL_PORT
+            prompt "I2C port"
+            default I2C_PROTOCOL_PORT_0
+
+            config I2C_PROTOCOL_PORT_0
+                bool "I2C_NUM_0"
+
+            config I2C_PROTOCOL_PORT_1
+                bool "I2C_NUM_1"
+        endchoice
+
+        config I2C_PROTOCOL_BUS_SPEED
+            int "Bus speed (Hz)"
+            default 100000
+
+        config I2C_PROTOCOL_ADDR_BIT_7
+            bool "Use 7-bit addressing (uncheck for 10-bit)"
+            default y
+
+        config I2C_PROTOCOL_SCL_WAIT_US
+            int "SCL wait timeout (microseconds)"
+            default 10000000
+
+    endmenu
+
+    menu "Protocol Tuning"
+
+        config I2C_PROTOCOL_PACKET_PAYLOAD_SIZE
+            int "Payload size per chunk (bytes)"
+            default 40
+            range 1 256
+
+        config I2C_PROTOCOL_MAX_PAYLOAD_SIZE
+            int "Maximum total payload size (bytes)"
+            default 122880
+
+        config I2C_PROTOCOL_REQUEST_TIMEOUT
+            int "Request timeout (ms)"
+            default 5000
+
+        config I2C_PROTOCOL_COMMS_MANAGER_DELAY
+            int "TX/RX task loop delay (ms)"
+            default 10
+
+    endmenu
+
+    menu "Task Configuration"
+
+        config I2C_PROTOCOL_RX_TASK_STACK_SIZE
+            int "RX task stack size (bytes)"
+            default 4096
+
+        config I2C_PROTOCOL_TX_TASK_STACK_SIZE
+            int "TX task stack size (bytes)"
+            default 4096
+
+        config I2C_PROTOCOL_PROC_TASK_STACK_SIZE
+            int "Processing task stack size (bytes)"
+            default 4096
+
+        config I2C_PROTOCOL_COMMS_TASK_PRIORITY
+            int "Comms task priority"
+            default 5
+
+        config I2C_PROTOCOL_PROC_TASK_PRIORITY
+            int "Processing task priority"
+            default 5
+
+    endmenu
+
+    config I2C_PROTOCOL_ASYNC_DEBUG
+        bool "Enable async debug logging"
+        default n
+
+endmenu
