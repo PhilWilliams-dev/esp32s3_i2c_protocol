@@ -9,24 +9,23 @@
 
 
 #define MAX_PAYLOAD_SIZE (122880)  // User-defined total payload size in bytes (e.g., 120 KB)
-#define PACKET_HEADER_SIZE 4    // command (1) + length (2, little-endian)
-#define PACKET_CRC_SIZE 2      // 16-bit CRC (little-endian)
-#define PACKET_PAYLOAD_SIZE 40 // Fixed payload size per chunk (adjustable)
+#define PACKET_HEADER_SIZE 4      // command (1) + reply (1) + length (2, little-endian)
+#define PACKET_CRC_SIZE 2         // 16-bit CRC (little-endian)
+#define PACKET_PAYLOAD_SIZE 40    // Fixed payload size per chunk (adjustable)
 
-//Do not modify these uness you know what you are doing
-#define PACKET_TOTAL_SIZE (PACKET_HEADER_SIZE + PACKET_PAYLOAD_SIZE + PACKET_CRC_SIZE) // 46 bytes per chunk
+// Do not modify these unless you know what you are doing
+#define PACKET_TOTAL_SIZE (PACKET_HEADER_SIZE + PACKET_PAYLOAD_SIZE + PACKET_CRC_SIZE)
 #define I2C_RX_TASK_STACK_SIZE 4096
 #define I2C_TX_TASK_STACK_SIZE 4096
-#define I2C_PROC_TASK_STACK_SIZE 4096 //+ MAX_PAYLOAD_SIZE
-#define I2C_MAIN_TASK_STACK_SIZE (I2C_RX_TASK_STACK_SIZE + I2C_TX_TASK_STACK_SIZE + I2C_PROC_TASK_STACK_SIZE) //Main root task size
+#define I2C_PROC_TASK_STACK_SIZE 4096
 
-//I2C Timing
-#define I2C_COMMS_MANAGER_DELAY 10 //task delay for tx and rx tasks, cycle time if you will
+// I2C Timing
+#define I2C_COMMS_MANAGER_DELAY 10  // Cycle time (ms) for TX and RX task loops
 #define I2C_REQUEST_TIMEOUT 5000
 #define I2C_COMMS_TASK_PRIORITY 5
 #define I2C_PROC_TASK_PRIORITY 5
 
-//I2C Config
+// I2C Config
 #define I2C_BUS_SPEED 100000
 #define SDA_PIN GPIO_NUM_8
 #define SCL_PIN GPIO_NUM_9
@@ -54,17 +53,10 @@ typedef uint8_t i2c_command_t;
     static const i2c_command_t name = (value)
 
 typedef enum {
-    I2C_SEND = 1,
-    I2C_SEND_OK_BACK = 2,
-    I2C_SEND_DATA_OK_BACK = 3,
-    I2C_SEND_DATA_DATA_BACK = 4
-    } i2c_command_type_t;
-
-typedef enum {
-    REPLY_NONE,  // No reply expected
-    REPLY_OK,    // Expects CMD_OK
-    REPLY_DATA,  // Expects OK with data
-    REPLY_CHUNK //Expects to get the data back in chunks
+    REPLY_NONE,
+    REPLY_OK,
+    REPLY_DATA,
+    REPLY_CHUNK
     } reply_type_t;
     
 typedef enum {
@@ -83,38 +75,82 @@ typedef enum {
     TX_STATE_ERROR
     } tx_state_t;
 
-    // Data packet structure for I2C communication
 typedef struct {
     i2c_command_t command;
     reply_type_t reply;
     uint16_t length;
     uint8_t data[PACKET_PAYLOAD_SIZE];
-    uint16_t crc; // 16-bit CRC
+    uint16_t crc;
 } data_packet_t;
 
 
+/// @brief Splits a 16-bit integer into 2 bytes respecting endianness.
+/// @param value The 16-bit integer to split.
+/// @param bytes Output array (at least 2 bytes).
+/// @param is_big_endian Non-zero for big-endian, zero for little-endian.
 void integer_to_bytes(uint16_t value, uint8_t *bytes, int is_big_endian);
+
+/// @brief Assembles 2 bytes into a 16-bit integer respecting endianness.
+/// @param bytes 2-byte input array.
+/// @param is_big_endian Non-zero for big-endian, zero for little-endian.
+/// @return The reconstructed 16-bit integer.
 uint16_t bytes_to_integer(uint8_t *bytes, int is_big_endian);
 
+/// @brief Decodes a received byte array into a packet structure with CRC validation.
+/// @param buffer Raw received bytes (must be PACKET_TOTAL_SIZE for a full packet).
+/// @param buffer_length Size of the buffer.
+/// @param packet Output packet structure (zeroed first to prevent stale data).
+/// @return ESP_OK on success, or ESP_ERR_INVALID_SIZE / ESP_ERR_INVALID_STATE / ESP_ERR_INVALID_CRC.
 esp_err_t decode_received_packet(const uint8_t *buffer, size_t buffer_length, data_packet_t *packet);
+
+/// @brief Builds a transmit byte array from a packet structure, including CRC.
+/// @param packet Source packet to serialise.
+/// @param buffer Output buffer (must be at least PACKET_TOTAL_SIZE bytes).
 void assemble_transmit_buffer(data_packet_t *packet, uint8_t *buffer);
 
-
+/// @brief Returns the number of chunks needed to send the given byte count.
+/// @param bytes Total payload size in bytes.
+/// @return Number of PACKET_PAYLOAD_SIZE chunks required (rounded up).
 uint16_t bytes_to_chunks(uint32_t bytes);
+
+/// @brief Returns the maximum byte capacity for the given chunk count.
+/// @param chunks Number of chunks.
+/// @return Maximum byte count (chunks * PACKET_PAYLOAD_SIZE).
 uint32_t chunks_to_bytes(uint16_t chunks);
+
+/// @brief Checks if a byte array contains a null terminator within the given length.
+/// @param data Input byte array (may be NULL).
+/// @param length Number of bytes to scan.
+/// @return true if a '\0' is found within length, false otherwise.
 bool is_null_terminated(const uint8_t* data, size_t length);
+
+/// @brief Allocates a new null-terminated string from a byte array. Caller must free the result.
+/// @param data Input byte array (may be NULL).
+/// @param length Number of bytes to consider.
+/// @return Heap-allocated null-terminated char*, or NULL on failure/invalid input.
 char* make_null_terminated_str(const uint8_t* data, size_t length);
 
-// ASYNC_DEBUG_ENABLED control - set to 0 to disable async logging
+// Set ASYNC_DEBUG_ENABLED to 1 to enable async logging, 0 to disable
 #ifndef ASYNC_DEBUG_ENABLED
-#define ASYNC_DEBUG_ENABLED 0  // Default to enabled
+#define ASYNC_DEBUG_ENABLED 0
 #endif
 
 #define ASYNC_LOG(tag, format, ...) async_log((tag), (format), ##__VA_ARGS__);
+
+/// @brief Initialises the async logging queue and background task. Safe to call multiple times.
 void async_log_init(void);
+
+/// @brief Queues a formatted log message for background output. Non-blocking; drops if queue is full.
+/// @param tag Short identifier shown in the log output.
+/// @param format printf-style format string.
 void async_log(const char* tag, const char* format, ...);
+
+/// @brief Queues a hex dump of a byte buffer for background output.
+/// @param tag Short identifier shown in the log output.
+/// @param prefix Optional string prepended to the hex data (may be NULL).
+/// @param data Byte array to dump (may be NULL).
+/// @param len Number of bytes to dump.
 void async_log_hex(const char* tag, const char* prefix, const uint8_t* data, size_t len);
-void log_packet_details(const char *action, const uint8_t *buffer, const data_packet_t *packet, uint16_t chunk_num, uint16_t total_chunks, bool is_rx);
 
 
 
