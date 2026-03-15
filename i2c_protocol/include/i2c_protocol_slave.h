@@ -1,6 +1,8 @@
 #ifndef I2C_SLAVE_PROTOCOL_H
 #define I2C_SLAVE_PROTOCOL_H
 
+#include "sdkconfig.h"
+
 #ifndef CONFIG_I2C_PROTOCOL_SLAVE
 #error "I2C Slave code detected but CONFIG_I2C_PROTOCOL_SLAVE is not enabled. " \
        "Please enable slave mode in menuconfig: Component config -> i2c_protocol -> I2C Protocol Role -> Slave, " \

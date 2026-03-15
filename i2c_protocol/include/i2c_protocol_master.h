@@ -1,6 +1,8 @@
 #ifndef I2C_MASTER_PROTOCOL_H
 #define I2C_MASTER_PROTOCOL_H
 
+#include "sdkconfig.h"
+
 #ifndef CONFIG_I2C_PROTOCOL_MASTER
 #error "I2C Master code detected but CONFIG_I2C_PROTOCOL_MASTER is not enabled. " \
        "Please enable master mode in menuconfig: Component config -> i2c_protocol -> I2C Protocol Role -> Master, " \

@@ -549,9 +549,14 @@ esp_err_t i2c_make_request(i2c_command_t command, uint8_t *payload, uint32_t pay
         // ── Handle REPLY_CHUNK ──
         if(reply_type == REPLY_CHUNK){
             uint16_t number_of_chunks;
-            
             uint8_t *chunked_data;
             uint32_t incoming_data_length;
+            
+            // Restore saved packet in case cleanup ran before we got here
+            if(saved_chunked_response_valid) {
+                memcpy(&rx_current_packet, &saved_chunked_response_packet, sizeof(data_packet_t));
+                saved_chunked_response_valid = false;
+            }
 
             if(rx_current_packet.command == CMD_START_CHUNKING){
                 reply_chunking = true;
