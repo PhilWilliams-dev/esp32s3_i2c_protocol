@@ -13,7 +13,8 @@ static TaskHandle_t rx_task_handle = NULL;
 static TaskHandle_t tx_task_handle = NULL;
 static TaskHandle_t command_task_handle = NULL;
 static i2c_master_bus_handle_t bus_handle;
-static i2c_master_dev_handle_t slave_device;
+static i2c_master_dev_handle_t slave_device;                          // active handle for the current request
+static i2c_master_dev_handle_t device_handles[I2C_MAX_SLAVE_ID];      // cached handles indexed by slave_id (busid)
 
 // RX storage
 static uint8_t raw_rx_buffer[PACKET_TOTAL_SIZE];
@@ -401,33 +402,9 @@ esp_err_t make_chunked_request(i2c_command_t command, reply_type_t reply_type, u
 
 // ─── Public Request API ─────────────────────────────────────────────
 
-/// @brief Sends a command to a slave and optionally waits for a response.
-///        Payloads larger than PACKET_PAYLOAD_SIZE are automatically chunked.
-///        For REPLY_DATA and REPLY_CHUNK the caller must free *response_data.
-/// @param command         The command byte to send.
-/// @param payload         Pointer to the outbound data (may be NULL if payload_length is 0).
-/// @param payload_length  Number of bytes in payload.
-/// @param slave_id        7-bit I2C address of the target slave.
-/// @param reply_type      Expected reply: REPLY_NONE, REPLY_OK, REPLY_DATA, or REPLY_CHUNK.
-/// @param response_data   [out] Heap-allocated response buffer (caller frees). May be NULL for REPLY_NONE/OK.
-/// @param response_length [out] Number of bytes written to *response_data. May be NULL for REPLY_NONE/OK.
-/// @return ESP_OK on success, or an appropriate esp_err_t on failure.
-esp_err_t i2c_make_request(i2c_command_t command, uint8_t *payload, uint32_t payload_length, uint8_t slave_id, reply_type_t reply_type, uint8_t **response_data, uint32_t *response_length){
-    ASYNC_LOG("MST_REQ", "Request cmd=%u reply=%u len=%lu slave=0x%02X", command, reply_type, payload_length, slave_id);
-
-    esp_err_t error_check;
-    
-    i2c_device_config_t device = {
-        .dev_addr_length = I2C_ADDR_BIT,
-        .device_address = slave_id,
-        .scl_speed_hz = I2C_BUS_SPEED,
-        .scl_wait_us = I2C_SCL_WAIT_US
-        };
-
-    error_check = i2c_master_bus_add_device(bus_handle, &device, &slave_device);
-    if(error_check != ESP_OK){
-        return ESP_FAIL;
-    }
+/// @brief Inner implementation of i2c_make_request. Assumes slave_device has already
+///        been registered on the bus by the caller and will be removed by the caller.
+static esp_err_t i2c_do_request(i2c_command_t command, uint8_t *payload, uint32_t payload_length, uint8_t slave_id, reply_type_t reply_type, uint8_t **response_data, uint32_t *response_length){
 
     if (payload_length > MAX_PAYLOAD_SIZE) {
         return ESP_ERR_INVALID_SIZE;
@@ -551,7 +528,7 @@ esp_err_t i2c_make_request(i2c_command_t command, uint8_t *payload, uint32_t pay
             uint16_t number_of_chunks;
             uint8_t *chunked_data;
             uint32_t incoming_data_length;
-            
+
             // Restore saved packet in case cleanup ran before we got here
             if(saved_chunked_response_valid) {
                 memcpy(&rx_current_packet, &saved_chunked_response_packet, sizeof(data_packet_t));
@@ -828,6 +805,43 @@ esp_err_t i2c_make_request(i2c_command_t command, uint8_t *payload, uint32_t pay
     }
 }
 
+/// @brief Sends a command to a slave and optionally waits for a response.
+///        Payloads larger than PACKET_PAYLOAD_SIZE are automatically chunked.
+///        For REPLY_DATA and REPLY_CHUNK the caller must free *response_data.
+///        Device handles are created on first use and cached for the lifetime of the bus,
+///        so there are no heap allocations in the hot polling path after first contact.
+/// @param command         The command byte to send.
+/// @param payload         Pointer to the outbound data (may be NULL if payload_length is 0).
+/// @param payload_length  Number of bytes in payload.
+/// @param slave_id        7-bit I2C address of the target slave (must be < 100).
+/// @param reply_type      Expected reply: REPLY_NONE, REPLY_OK, REPLY_DATA, or REPLY_CHUNK.
+/// @param response_data   [out] Heap-allocated response buffer (caller frees). May be NULL for REPLY_NONE/OK.
+/// @param response_length [out] Number of bytes written to *response_data. May be NULL for REPLY_NONE/OK.
+/// @return ESP_OK on success, or an appropriate esp_err_t on failure.
+esp_err_t i2c_make_request(i2c_command_t command, uint8_t *payload, uint32_t payload_length, uint8_t slave_id, reply_type_t reply_type, uint8_t **response_data, uint32_t *response_length){
+    ASYNC_LOG("MST_REQ", "Request cmd=%u reply=%u len=%lu slave=0x%02X", command, reply_type, payload_length, slave_id);
+
+    if (slave_id >= I2C_MAX_SLAVE_ID) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (device_handles[slave_id] == NULL) {
+        i2c_device_config_t device = {
+            .dev_addr_length = I2C_ADDR_BIT,
+            .device_address  = slave_id,
+            .scl_speed_hz    = I2C_BUS_SPEED,
+            .scl_wait_us     = I2C_SCL_WAIT_US
+        };
+        esp_err_t err = i2c_master_bus_add_device(bus_handle, &device, &device_handles[slave_id]);
+        if (err != ESP_OK) {
+            return ESP_FAIL;
+        }
+    }
+
+    slave_device = device_handles[slave_id];
+    return i2c_do_request(command, payload, payload_length, slave_id, reply_type, response_data, response_length);
+}
+
 
 
 // ─── Task & Init ────────────────────────────────────────────────────
@@ -855,6 +869,7 @@ esp_err_t i2c_master_protocol_init(i2c_master_bus_config_t *bus_config){
     memset(raw_tx_buffer, 0, PACKET_TOTAL_SIZE);
     memset(&rx_current_packet, 0, sizeof(data_packet_t));
     memset(&tx_current_packet, 0, sizeof(data_packet_t));
+    memset(device_handles, 0, sizeof(device_handles));
 
     esp_err_t err = i2c_new_master_bus(bus_config, &bus_handle);
     if (err != ESP_OK) {

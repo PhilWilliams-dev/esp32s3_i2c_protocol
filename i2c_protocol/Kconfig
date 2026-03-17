@@ -50,6 +50,14 @@ menu "I2C Protocol"
 
     menu "Protocol Tuning"
 
+        config I2C_PROTOCOL_MAX_SLAVE_ID
+            int "Maximum slave ID (device handle table size)"
+            default 100
+            range 1 128
+            help
+                Size of the static device handle cache. Slave IDs (busids) must be
+                strictly less than this value. Increase if your slave addresses exceed 99.
+
         config I2C_PROTOCOL_PACKET_PAYLOAD_SIZE
             int "Payload size per chunk (bytes)"
             default 40
